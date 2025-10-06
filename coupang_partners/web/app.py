@@ -21,6 +21,10 @@ from ..publisher.token_store import (
 )
 from ..aff_store import put_affiliate, all_affiliates
 from ..orchestrator import run_once
+from ..trends import generate_trending_keywords
+from ..miner import select_coupang_miner
+from ..store import mark_posted, posted_set
+from ..aff_store import get_affiliate
 
 
 app = FastAPI(title="Coupang Partners GUI")
@@ -58,6 +62,16 @@ def index():
       <header>
         <h2>쿠팡 파트너스 — 자동 발행 GUI</h2>
       </header>
+
+      <div class='card'>
+        <h3>상품 찾기</h3>
+        <p>트렌드(네이버 DataLab + OpenAI) 기반으로 아직 게시하지 않은 상품 10개를 자동으로 찾습니다.</p>
+        <button onclick="discoverProducts()">상품 10개 찾기</button>
+        <div id='discover_list' style='margin-top:1rem'></div>
+        <div style='margin-top:1rem'>
+          <button onclick='generateSelected()'>선택한 상품으로 글 생성</button>
+        </div>
+      </div>
 
       <div class='card'>
         <h3>빠른 실행</h3>
@@ -139,6 +153,10 @@ def index():
       <div class='card'>
         <h3>결과</h3>
         <pre id='out'>아직 실행하지 않았습니다.</pre>
+        <div style='margin-top:8px;'>
+          <button onclick='copyOutput()'>복사</button>
+          <button onclick='markSelectedPosted()'>선택 상품 게시 완료로 표시</button>
+        </div>
       </div>
 
       <div class='card'>
@@ -180,6 +198,65 @@ def index():
           const res = await fetch('/api/config', {{ method: 'POST', headers: {{'Content-Type':'application/json'}}, body: JSON.stringify(entries) }});
           const data = await res.json();
           alert(data.message || '저장됨');
+        }}
+
+        function productRow(item) {{
+          const aff = item.affiliate_url || '';
+          return `
+            <div style='border:1px solid #eee;padding:.5rem;border-radius:6px;margin:.5rem 0;'>
+              <label><input type='checkbox' class='sel' value='${encodeURIComponent(item.url||'')}'/></label>
+              <strong>${item.title||''}</strong>
+              <div>
+                <a href='${item.url||'#'}' target='_blank'>원본보기</a>
+                ${item.price?` · 가격: ${item.price}`:''}
+                ${item.rating?` · 평점: ${item.rating}`:''}
+              </div>
+              <div>
+                제휴링크: <input class='aff' data-raw='${encodeURIComponent(item.url||'')}' value='${aff}' placeholder='https://link.coupang.com/...'/>
+                <button onclick='saveAff("${encodeURIComponent(item.url||'')}")'>저장</button>
+              </div>
+            </div>`;
+        }}
+
+        async function discoverProducts() {{
+          const res = await fetch('/api/products/discover?limit=10');
+          const data = await res.json();
+          const html = data.items.map(productRow).join('');
+          document.getElementById('discover_list').innerHTML = html || '결과 없음';
+        }}
+
+        async function saveAff(rawEnc) {{
+          const raw = decodeURIComponent(rawEnc);
+          const input = document.querySelector(`input.aff[data-raw="${rawEnc}"]`);
+          const aff = input.value.trim();
+          const res = await fetch('/api/affiliate', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{raw_url:raw, affiliate_url:aff}})}});
+          const data = await res.json();
+          alert(data.message || '저장됨');
+        }}
+
+        async function generateSelected() {{
+          const checks = Array.from(document.querySelectorAll('#discover_list input.sel:checked'));
+          if (checks.length === 0) {{ alert('선택된 상품이 없습니다'); return; }}
+          const raws = checks.map(c => decodeURIComponent(c.value));
+          const rows = Array.from(document.querySelectorAll('#discover_list .aff'));
+          const affMap = Object.fromEntries(rows.map(r=>[decodeURIComponent(r.getAttribute('data-raw')), r.value.trim()]));
+          const payload = {{ products: raws.map(url => ({{ url, affiliate_url: affMap[url]||null }})) }};
+          const res = await fetch('/api/generate', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}});
+          const data = await res.json();
+          document.getElementById('out').textContent = data.html || JSON.stringify(data, null, 2);
+        }}
+
+        async function markSelectedPosted() {{
+          const checks = Array.from(document.querySelectorAll('#discover_list input.sel:checked'));
+          if (checks.length === 0) {{ alert('선택 없음'); return; }}
+          const raws = checks.map(c => decodeURIComponent(c.value));
+          await fetch('/api/posted', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{urls: raws}})}});
+          alert('표시 완료');
+        }}
+
+        async function copyOutput() {{
+          const txt = document.getElementById('out').textContent;
+          try {{ await navigator.clipboard.writeText(txt); alert('복사 완료'); }} catch(e) {{ alert('복사 실패: '+e); }}
         }}
 
         async function saveAffiliate(e) {{
@@ -234,6 +311,92 @@ def api_run(payload: Dict[str, Any]):
     dry_run = bool(payload.get("dry_run", False))
     res = run_once(config_path=_load_config_path(), count=int(count) if count else None, mode=mode, dry_run=dry_run)
     return JSONResponse(res)
+
+
+@app.get("/api/products/discover")
+def api_products_discover(limit: int = 10):
+    s = load_settings(_load_config_path())
+    kws = generate_trending_keywords(s, count=limit)
+    miner = select_coupang_miner(s.coupang_source.mode)
+    seen = set()
+    posted = posted_set()
+    items = []
+    for kw in kws:
+        ps = miner.search_products(kw, limit=10)
+        for p in ps:
+            if not p.url or p.url in seen or p.url in posted:
+                continue
+            seen.add(p.url)
+            items.append({
+                "id": p.id,
+                "title": p.title,
+                "price": p.price,
+                "rating": p.rating,
+                "url": p.url,
+                "affiliate_url": get_affiliate(p.url) or None,
+                "keyword": kw,
+            })
+            if len(items) >= limit:
+                break
+        if len(items) >= limit:
+            break
+    return JSONResponse({"items": items, "keywords": kws})
+
+
+@app.post("/api/generate")
+def api_generate(payload: Dict[str, Any]):
+    # payload: { products: [{ url, affiliate_url? }] }
+    products = payload.get("products") or []
+    if not products:
+        return JSONResponse({"message": "products 비어있음"}, status_code=400)
+    # Fetch minimal product info via crawler and build a roundup HTML using existing writer (single → simple roundup)
+    s = load_settings(_load_config_path())
+    miner = select_coupang_miner(s.coupang_source.mode)
+    from ..writer import inject_disclosure
+    from ..writer import render_minimal_html
+    from ..writer import chat_text, WRITER_SYSTEM
+    import json as _json
+
+    collected = []
+    for it in products:
+        url = it.get("url")
+        if not url:
+            continue
+        # best-effort enrich via crawler detail page
+        p = None
+        # Search can't be by url; skip enrich if not
+        # Build minimal dict
+        collected.append({
+            "title": url.split("/")[-1][:60],
+            "url": url,
+            "deeplink": it.get("affiliate_url") or get_affiliate(url) or url,
+            "price": None,
+            "rating": None,
+            "specs": {},
+        })
+
+    # Ask LLM to produce a roundup HTML from the list
+    try:
+        sys = "역할: 한국어 쇼핑 블로거. 입력의 제품 목록을 바탕으로 라운드업 글을 작성. 각 제품마다 미니리뷰 2~3문장, 간단 장단점 1~2개, 사용팁 1개 포함. HTML로 반환. CTA는 제공된 deeplink 사용."
+        user = _json.dumps({"products": collected}, ensure_ascii=False)
+        html = chat_text(model=s.providers.openai_model, system=sys, user=user, temperature=0.6, max_tokens=1600)
+    except Exception:
+        # fallback: concatenate minimal blocks
+        block = []
+        for c in collected:
+            block.append(render_minimal_html(c))
+        html = "\n".join(block)
+
+    return JSONResponse({"html": inject_disclosure(html)})
+
+
+@app.post("/api/posted")
+def api_mark_posted(payload: Dict[str, Any]):
+    urls = payload.get("urls") or []
+    if not urls:
+        return JSONResponse({"message": "urls 비어있음"}, status_code=400)
+    mark_posted(urls)
+    return JSONResponse({"message": "저장되었습니다"})
 
 
 @app.get("/api/naver/status")
