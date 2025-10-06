@@ -57,6 +57,17 @@ class CoupangApiMiner:
         resp.raise_for_status()
         return resp
 
+    def _post(self, path: str, json_body: dict) -> requests.Response:
+        query = ""
+        headers = {
+            "Authorization": self._authorization("POST", path, query),
+            "Content-Type": "application/json",
+        }
+        url = f"{self.HOST}{path}{query}"
+        resp = requests.post(url, headers=headers, json=json_body, timeout=20)
+        resp.raise_for_status()
+        return resp
+
     def search_products(self, keyword: str, limit: int = 10) -> List[Product]:
         if not self._has_keys():
             return []
@@ -100,3 +111,23 @@ class CoupangApiMiner:
         # For API, assume search already returns most fields. No-op for now.
         return product
 
+    # --- Affiliate deeplink conversion ---
+    def deeplink(self, urls: list[str]) -> list[Optional[str]]:
+        if not self._has_keys():
+            return [None] * len(urls)
+        path = "/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink"
+        body = {"coupangUrls": urls}
+        try:
+            resp = self._post(path, body)
+            data = resp.json()
+            results = []
+            for item in data.get("data", []) or []:
+                # API response shape may include 'originUrl' + 'shortenUrl' or 'trackingUrl'
+                aff = item.get("shortenUrl") or item.get("trackingUrl")
+                results.append(aff)
+            # If counts mismatch, pad with None
+            while len(results) < len(urls):
+                results.append(None)
+            return results[: len(urls)]
+        except Exception:
+            return [None] * len(urls)

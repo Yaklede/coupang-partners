@@ -39,6 +39,7 @@ coupang_source:
 ```
 
 When set to `auto`, the miner uses API if `COUPANG_OPENAPI_ACCESS_KEY` and `COUPANG_OPENAPI_SECRET_KEY` are present, otherwise falls back to the crawler.
+For affiliate links, see `affiliate` section below.
 
 ### Notes
 
@@ -98,6 +99,20 @@ Notes: 이 토큰/자격증명은 로컬 파일에 저장되며, 저장소 커�
 - 프록시/게이트웨이/자체 엔드포인트 사용: `.env`에 `OPENAI_BASE_URL`을 해당 엔드포인트로 지정하세요(예: `https://my-gateway.example.com/v1`).
 - Azure OpenAI를 사용할 경우에는 Azure 전용 엔드포인트와 배포 모델 구성을 따라야 하며, 본 리포지토리의 기본 예제는 표준 OpenAI API 엔드포인트를 가정합니다.
 
+### Coupang Partners 링크 생성
+
+- 설정: `config.yaml`의 `affiliate` 섹션
+
+```
+affiliate:
+  generation: none            # none | partners_api | portal (beta)
+  require_for_publish: true   # true면 제휴링크 없으면 게시 스킵
+```
+
+- 권장: `partners_api` (공식 Partners Open API 필요) — 현재 코드는 자리표시이며, 실제 딥링크 변환 엔드포인트 연동이 필요합니다.
+- `portal`(beta): 포털 로그인 자동화는 보안/정책/2FA 이슈로 기본 비활성화(자리표시). 정책 위반 위험이 있으므로 추천하지 않습니다.
+- `none`: 제휴링크를 만들지 않음. `require_for_publish: true`인 경우 게시를 스킵합니다.
+
 
 Force API mode (keys required in `.env` or `-e`):
 
@@ -125,5 +140,6 @@ Configuration used:
 - Keywords: `keywords.daily_count`, plus optional seed categories
 - Coupang source: `coupang_source.mode` (default `crawler`)
 - Naver: requires `NAVER_ACCESS_TOKEN` in `.env`
+- Affiliate links: set `affiliate.generation` (default `none`). When `require_for_publish: true`, posts are skipped until a valid affiliate link is available.
 
 Outputs a JSON summary and posts to Naver when token is present. Without a token, it will skip publishing and mark the status as `skipped`.

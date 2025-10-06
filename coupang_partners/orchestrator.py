@@ -8,6 +8,7 @@ from .keywords import generate_keywords
 from .miner import select_coupang_miner
 from .models import Product
 from .writer import build_rag, write_post, refine_post, seo_optimize, inject_disclosure, ensure_cta, render_minimal_html
+from .links import generate_affiliate_link
 from .publisher.naver import NaverPublisher
 
 
@@ -34,6 +35,10 @@ def run_once(config_path: str | None = None, count: int | None = None, mode: str
         # choose top candidate
         product = items[0]
         product = miner.enrich_product(product)
+        # Try to ensure affiliate deeplink according to config
+        aff = generate_affiliate_link(product.url or "", method=settings.affiliate.generation)
+        if aff:
+            product.deeplink = aff
 
         # 3) RAG build
         rag = build_rag(asdict(product))
@@ -57,7 +62,9 @@ def run_once(config_path: str | None = None, count: int | None = None, mode: str
         final_html = inject_disclosure(improved_html)
 
         # 7) Publisher
-        if dry_run:
+        if settings.affiliate.require_for_publish and not (product.deeplink):
+            pub = {"status": "skipped", "reason": "no_affiliate_link"}
+        elif dry_run:
             pub = {"status": "skipped", "reason": "dry_run"}
         else:
             pub = publisher.publish(title=title, html=final_html, category_no=settings.posting.default_category_no, tags=hashtags)

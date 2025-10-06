@@ -55,6 +55,11 @@ class KeywordsConfig:
     seed_categories: List[str] | None = None
     fallback_list: List[str] | None = None
 
+@dataclass
+class AffiliateConfig:
+    generation: str = "none"  # none | partners_api | portal
+    require_for_publish: bool = True
+
 
 @dataclass
 class Settings:
@@ -65,6 +70,7 @@ class Settings:
     providers: ProvidersConfig
     coupang_source: CoupangSourceConfig
     keywords: KeywordsConfig
+    affiliate: AffiliateConfig
 
 
 def _dict_get(d: Dict[str, Any], path: str, default: Any = None) -> Any:
@@ -131,6 +137,11 @@ def load_settings(path: str | None = None) -> Settings:
         fallback_list=list(_dict_get(cfg, "keywords.fallback_list", ["가습기", "제습기", "무선 청소기", "에어프라이어", "전기포트"])),
     )
 
+    affiliate = AffiliateConfig(
+        generation=_dict_get(cfg, "affiliate.generation", "none"),
+        require_for_publish=bool(_dict_get(cfg, "affiliate.require_for_publish", True)),
+    )
+
     return Settings(
         app=app,
         cost=cost,
@@ -139,4 +150,5 @@ def load_settings(path: str | None = None) -> Settings:
         providers=providers,
         coupang_source=coupang_source,
         keywords=keywords,
+        affiliate=affiliate,
     )

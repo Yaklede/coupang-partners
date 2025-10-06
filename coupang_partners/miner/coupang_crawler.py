@@ -19,15 +19,13 @@ class CoupangCrawlerMiner:
         self.partner_id = partner_id or os.getenv("COUPANG_PARTNER_ID")
 
     def _build_deeplink(self, url: str, keyword: str) -> str:
-        if not self.partner_id:
-            return url
-        qs = {
-            "src": "blog",
-            "partner": self.partner_id,
-            "keyword": keyword,
-        }
-        sep = "&" if ("?" in url) else "?"
-        return f"{url}{sep}{urllib.parse.urlencode(qs)}"
+        # IMPORTANT: Official Coupang Partners affiliate links are generated
+        # via the Partners portal or the Partners Open API after authentication.
+        # Building a link by adding arbitrary query params is NOT guaranteed to
+        # track correctly and may violate policy.
+        # In crawler mode without API/portal automation, return the raw URL and
+        # let the orchestrator attempt affiliate conversion later.
+        return url
 
     def search_products(self, keyword: str, limit: int = 10) -> List[Product]:
         q = urllib.parse.quote(keyword)
@@ -91,7 +89,7 @@ class CoupangCrawlerMiner:
                     review_cnt=review_cnt,
                     images=[],
                     url=product_url,
-                    deeplink=self._build_deeplink(product_url, keyword),
+                    deeplink=None,
                 )
             )
 
@@ -137,4 +135,3 @@ class CoupangCrawlerMiner:
                 pass
 
         return product
-
