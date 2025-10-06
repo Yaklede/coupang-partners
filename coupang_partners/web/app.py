@@ -22,6 +22,7 @@ from ..publisher.token_store import (
 from ..aff_store import put_affiliate, all_affiliates
 from ..orchestrator import run_once
 from ..trends import generate_trending_keywords
+from ..recommend import recommend_products_from_keywords
 from ..miner import select_coupang_miner
 from ..store import mark_posted, posted_set
 from ..aff_store import get_affiliate
@@ -329,48 +330,33 @@ def api_run(payload: Dict[str, Any]):
 @app.get("/api/products/discover")
 def api_products_discover(limit: int = 10, kw: Optional[str] = None):
     s = load_settings(_load_config_path())
-    kws = [kw] if kw else generate_trending_keywords(s, count=limit)
-    miner = select_coupang_miner(s.coupang_source.mode)
+    kws = [kw] if kw else generate_trending_keywords(s, count=5)
+    # Use OpenAI to recommend concrete product names from keywords
+    recs = recommend_products_from_keywords(s.providers.openai_model, kws, count=limit)
     seen = set()
     posted = posted_set()
     items = []
-    for kw in kws:
-        try:
-            ps = miner.search_products(kw, limit=8)
-        except Exception:
-            ps = []
-        for p in ps:
-            if not p.url or p.url in seen or p.url in posted:
-                continue
-            seen.add(p.url)
-            items.append({
-                "id": p.id,
-                "title": p.title,
-                "price": p.price,
-                "rating": p.rating,
-                "url": p.url,
-                "affiliate_url": get_affiliate(p.url) or None,
-                "keyword": kw,
-            })
-            if len(items) >= limit:
-                break
+    import urllib.parse as _uq
+    for r in recs:
+        name = r.get("name")
+        if not name:
+            continue
+        url = f"https://www.coupang.com/np/search?q={_uq.quote(name)}"
+        if url in seen or url in posted:
+            continue
+        seen.add(url)
+        items.append({
+            "id": name,
+            "title": name,
+            "price": None,
+            "rating": None,
+            "url": url,
+            "affiliate_url": get_affiliate(url) or None,
+            "keyword": r.get("reason") or ", ".join(kws),
+        })
         if len(items) >= limit:
             break
-    # Fallback: if no items found, return search links so 사용자가 바로 접근 가능
-    if not items:
-        import urllib.parse as _uq
-        for w in kws[:limit]:
-            search_link = f"https://www.coupang.com/np/search?q={_uq.quote(w)}"
-            items.append({
-                "id": w,
-                "title": f"[검색] {w}",
-                "price": None,
-                "rating": None,
-                "url": search_link,
-                "affiliate_url": None,
-                "keyword": w,
-            })
-    return JSONResponse({"items": items, "keywords": kws})
+    return JSONResponse({"items": items, "keywords": kws, "source": "naver+datalab+openai"})
 
 
 @app.post("/api/generate")
@@ -379,9 +365,8 @@ def api_generate(payload: Dict[str, Any]):
     products = payload.get("products") or []
     if not products:
         return JSONResponse({"message": "products 비어있음"}, status_code=400)
-    # Fetch minimal product info via crawler and build a roundup HTML using existing writer (single → simple roundup)
+    # Build a roundup HTML purely from provided names + links (no crawling)
     s = load_settings(_load_config_path())
-    miner = select_coupang_miner(s.coupang_source.mode)
     from ..writer import inject_disclosure
     from ..writer import render_minimal_html
     from ..writer import chat_text, WRITER_SYSTEM
@@ -389,15 +374,14 @@ def api_generate(payload: Dict[str, Any]):
 
     collected = []
     for it in products:
+        name = it.get("title") or it.get("name") or "상품"
         url = it.get("url")
         if not url:
-            continue
-        # best-effort enrich via crawler detail page
-        p = None
-        # Search can't be by url; skip enrich if not
-        # Build minimal dict
+            # generate link from name
+            import urllib.parse as _uq
+            url = f"https://www.coupang.com/np/search?q={_uq.quote(name)}"
         collected.append({
-            "title": url.split("/")[-1][:60],
+            "title": name,
             "url": url,
             "deeplink": it.get("affiliate_url") or get_affiliate(url) or url,
             "price": None,
@@ -407,7 +391,11 @@ def api_generate(payload: Dict[str, Any]):
 
     # Ask LLM to produce a roundup HTML from the list
     try:
-        sys = "역할: 한국어 쇼핑 블로거. 입력의 제품 목록을 바탕으로 라운드업 글을 작성. 각 제품마다 미니리뷰 2~3문장, 간단 장단점 1~2개, 사용팁 1개 포함. HTML로 반환. CTA는 제공된 deeplink 사용."
+        sys = (
+            "역할: 한국어 쇼핑 블로거. 입력 제품 목록으로 네이버 블로그용 라운드업 글을 작성합니다.\n"
+            "규칙: 각 제품마다 2~3문장 미니리뷰 + 장단점 1~2개 + 사용팁 1개. 과장/의학적 표현 금지.\n"
+            "출력: 한국어 HTML, 소제목 <h3>, 굵게 <strong>, CTA는 제공된 deeplink 사용."
+        )
         user = _json.dumps({"products": collected}, ensure_ascii=False)
         html = chat_text(model=s.providers.openai_model, system=sys, user=user, temperature=0.6, max_tokens=1600)
     except Exception:
