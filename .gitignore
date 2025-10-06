@@ -1,0 +1,14 @@
+secrets/
+*.env.local
+*.sqlite
+app.db
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+*.log
+.DS_Store
+.idea/
+.vscode/

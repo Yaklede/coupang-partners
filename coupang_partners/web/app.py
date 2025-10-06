@@ -4,11 +4,21 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import os
+import secrets
+import urllib.parse
+import requests
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ..config import load_settings
 from ..config_store import read_config, write_config
+from ..publisher.token_store import (
+    get_naver_app,
+    save_naver_app,
+    get_naver_tokens,
+    save_naver_tokens,
+)
 from ..orchestrator import run_once
 
 
@@ -108,6 +118,24 @@ def index():
       </div>
 
       <div class='card'>
+        <h3>네이버 연결(OAuth)</h3>
+        <form onsubmit="saveNaverApp(event)">
+          <label>Client ID</label>
+          <input name='client_id' id='naver_client_id' />
+          <label>Client Secret</label>
+          <input name='client_secret' id='naver_client_secret' />
+          <label>Redirect URI (개발자센터에 등록)</label>
+          <input name='redirect_uri' id='naver_redirect_uri' value='http://localhost:8000/oauth/naver/callback' />
+          <div style='margin-top:1rem'>
+            <button type='submit'>자격증명 저장</button>
+            <a id='naver_connect' href='/oauth/naver/start' style='margin-left:8px'>네이버 연결</a>
+          </div>
+          <small>액세스 토큰은 로컬 secrets/naver_token.json에 저장됩니다.</small>
+        </form>
+        <pre id='naver_status'>상태 확인 중…</pre>
+      </div>
+
+      <div class='card'>
         <h3>결과</h3>
         <pre id='out'>아직 실행하지 않았습니다.</pre>
       </div>
@@ -131,6 +159,27 @@ def index():
           const data = await res.json();
           alert(data.message || '저장됨');
         }}
+
+        async function saveNaverApp(e) {{
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const entries = Object.fromEntries(fd.entries());
+          const res = await fetch('/api/naver/credentials', {{ method: 'POST', headers: {{'Content-Type':'application/json'}}, body: JSON.stringify(entries) }});
+          const data = await res.json();
+          alert(data.message || '저장됨');
+          await refreshNaverStatus();
+        }}
+
+        async function refreshNaverStatus() {{
+          const res = await fetch('/api/naver/status');
+          const data = await res.json();
+          document.getElementById('naver_client_id').value = data.client_id || '';
+          document.getElementById('naver_client_secret').value = data.client_secret ? '********' : '';
+          document.getElementById('naver_redirect_uri').value = data.redirect_uri || 'http://localhost:8000/oauth/naver/callback';
+          document.getElementById('naver_status').textContent = JSON.stringify(data, null, 2);
+        }}
+
+        refreshNaverStatus();
       </script>
     </body>
     </html>
@@ -145,6 +194,88 @@ def api_run(payload: Dict[str, Any]):
     dry_run = bool(payload.get("dry_run", False))
     res = run_once(config_path=_load_config_path(), count=int(count) if count else None, mode=mode, dry_run=dry_run)
     return JSONResponse(res)
+
+
+@app.get("/api/naver/status")
+def api_naver_status():
+    app_info = get_naver_app()
+    tok = get_naver_tokens()
+    return JSONResponse({
+        "client_id": app_info.get("client_id"),
+        "client_secret": bool(app_info.get("client_secret")),
+        "redirect_uri": app_info.get("redirect_uri", "http://localhost:8000/oauth/naver/callback"),
+        "has_access_token": bool(tok.get("access_token")),
+        "token_expires_in": tok.get("expires_in"),
+    })
+
+
+@app.post("/api/naver/credentials")
+def api_naver_credentials(payload: Dict[str, Any]):
+    cid = payload.get("client_id")
+    cs = payload.get("client_secret")
+    ru = payload.get("redirect_uri") or "http://localhost:8000/oauth/naver/callback"
+    if not cid or not cs:
+        return JSONResponse({"message": "client_id/secret 필요"}, status_code=400)
+    save_naver_app(cid, cs, ru)
+    return JSONResponse({"message": "저장되었습니다"})
+
+
+# Simple in-memory state storage
+_naver_state: Optional[str] = None
+
+
+@app.get("/oauth/naver/start")
+def oauth_naver_start():
+    app_info = get_naver_app()
+    cid = app_info.get("client_id")
+    redirect_uri = app_info.get("redirect_uri") or "http://localhost:8000/oauth/naver/callback"
+    if not cid:
+        return JSONResponse({"message": "먼저 client_id/secret을 저장하세요"}, status_code=400)
+    state = secrets.token_urlsafe(16)
+    global _naver_state
+    _naver_state = state
+    params = {
+        "response_type": "code",
+        "client_id": cid,
+        "redirect_uri": redirect_uri,
+        "state": state,
+    }
+    url = "https://nid.naver.com/oauth2.0/authorize?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url)
+
+
+@app.get("/oauth/naver/callback")
+def oauth_naver_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, error_description: Optional[str] = None):
+    if error:
+        return HTMLResponse(f"<p>오류: {error} - {error_description}</p>")
+    if not code:
+        return HTMLResponse("<p>code 파라미터 누락</p>")
+    global _naver_state
+    if not state or state != _naver_state:
+        return HTMLResponse("<p>state 불일치</p>")
+    app_info = get_naver_app()
+    cid = app_info.get("client_id")
+    cs = app_info.get("client_secret")
+    redirect_uri = app_info.get("redirect_uri")
+    if not (cid and cs and redirect_uri):
+        return HTMLResponse("<p>앱 자격증명이 설정되지 않았습니다.</p>")
+
+    # Exchange code for token
+    token_url = "https://nid.naver.com/oauth2.0/token"
+    params = {
+        "grant_type": "authorization_code",
+        "client_id": cid,
+        "client_secret": cs,
+        "code": code,
+        "state": state,
+    }
+    r = requests.get(token_url, params=params, timeout=20)
+    if r.status_code >= 400:
+        return HTMLResponse(f"<p>토큰 발급 실패: {r.status_code} {r.text}</p>")
+    data = r.json()
+    save_naver_tokens(data)
+    _naver_state = None
+    return HTMLResponse("<p>연결 완료! 페이지를 닫고 GUI로 돌아가세요.</p>")
 
 
 @app.get("/api/config")

@@ -6,6 +6,9 @@ from typing import Optional, Dict, Any
 import requests
 
 
+from .token_store import get_naver_tokens
+
+
 class NaverPublisher:
     """Minimal Naver Blog post publisher.
 
@@ -21,7 +24,11 @@ class NaverPublisher:
     ENDPOINT = "https://openapi.naver.com/blog/writePost.json"
 
     def __init__(self, access_token: Optional[str] = None):
-        self.token = access_token or os.getenv("NAVER_ACCESS_TOKEN")
+        token = access_token or os.getenv("NAVER_ACCESS_TOKEN")
+        if not token:
+            t = get_naver_tokens()
+            token = t.get("access_token")
+        self.token = token
 
     def available(self) -> bool:
         return bool(self.token)
@@ -44,4 +51,3 @@ class NaverPublisher:
             return {"status": "ok", "code": resp.status_code, "data": resp.json()}
         except Exception as e:
             return {"status": "error", "error": str(e)}
-

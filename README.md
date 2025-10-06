@@ -83,6 +83,22 @@ From the GUI you can:
 - Trigger the full pipeline; see JSON results inline
 Future: config editing, logs, history, and scheduling can be added.
 
+### Connect Naver (OAuth) in GUI
+
+1) Open `http://localhost:8000` → "네이버 연결(OAuth)" 카드에서 Client ID/Secret/Redirect URI 입력 후 "자격증명 저장".
+2) Naver Developers 콘솔에도 동일한 Redirect URI 등록: `http://localhost:8000/oauth/naver/callback`.
+3) "네이버 연결" 클릭 → 로그인/동의 후 액세스 토큰이 로컬 `secrets/naver_token.json`에 저장됩니다.
+4) 이후 파이프라인 실행 시 자동으로 해당 토큰을 사용해 블로그 게시합니다.
+
+Notes: 이 토큰/자격증명은 로컬 파일에 저장되며, 저장소 커밋을 피하기 위해 `secrets/`는 `.gitignore` 처리되어 있습니다.
+
+### OpenAI Base URL 설정
+
+- 기본(OpenAI 공식 API): 별도 설정 없이 `.env`에 `OPENAI_API_KEY`만 있으면 됩니다. SDK 기본 Base URL은 `https://api.openai.com/v1` 입니다.
+- 프록시/게이트웨이/자체 엔드포인트 사용: `.env`에 `OPENAI_BASE_URL`을 해당 엔드포인트로 지정하세요(예: `https://my-gateway.example.com/v1`).
+- Azure OpenAI를 사용할 경우에는 Azure 전용 엔드포인트와 배포 모델 구성을 따라야 하며, 본 리포지토리의 기본 예제는 표준 OpenAI API 엔드포인트를 가정합니다.
+
+
 Force API mode (keys required in `.env` or `-e`):
 
 ```
