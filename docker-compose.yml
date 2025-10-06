@@ -1,0 +1,26 @@
+services:
+  app:
+    build: .
+    image: coupang-partners:local
+    working_dir: /app
+    # Mount the project for live edits; config/env stay on host
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    entrypoint: ["python", "-m", "coupang_partners.cli"]
+    command: ["--help"]
+    tty: true
+    stdin_open: true
+
+  web:
+    build: .
+    image: coupang-partners:local
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    entrypoint: ["python", "-m", "coupang_partners.web"]
+    ports:
+      - "8000:8000"
