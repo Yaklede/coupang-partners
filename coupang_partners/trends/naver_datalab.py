@@ -67,3 +67,23 @@ def trending_seeds_from_datalab(seed_categories: List[str], topk: int = 3) -> Li
     scored.sort(key=lambda x: x[1], reverse=True)
     return [s[0] for s in scored[:topk]] or seed_categories[:topk]
 
+
+def datalab_trend_context(seed_keywords: List[str], days: int = 30) -> Optional[Dict[str, Any]]:
+    """Return a compact trend context for LLM prompting: each keyword with last ratio and delta."""
+    data = datalab_search(seed_keywords, days=days)
+    if not data:
+        return None
+    ctx: Dict[str, Any] = {"window_days": days, "keywords": []}
+    for res in data.get("results", []):
+        series = res.get("data", [])
+        if not series:
+            continue
+        vals = [float(d.get("ratio", 0.0)) for d in series]
+        last = vals[-1]
+        prev = vals[:-1] or [0]
+        prev = prev[len(prev)//2:]
+        baseline = sum(prev)/len(prev)
+        delta = last - baseline
+        name = res.get("title") or res.get("keywords", [""])[0]
+        ctx["keywords"].append({"keyword": name, "last_ratio": last, "delta": delta})
+    return ctx

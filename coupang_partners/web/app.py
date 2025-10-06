@@ -23,6 +23,7 @@ from ..aff_store import put_affiliate, all_affiliates
 from ..orchestrator import run_once
 from ..trends import generate_trending_keywords
 from ..recommend import recommend_products_from_keywords
+from ..trends.naver_datalab import trending_seeds_from_datalab, datalab_trend_context
 from ..miner import select_coupang_miner
 from ..store import mark_posted, posted_set
 from ..aff_store import get_affiliate
@@ -330,9 +331,13 @@ def api_run(payload: Dict[str, Any]):
 @app.get("/api/products/discover")
 def api_products_discover(limit: int = 10, kw: Optional[str] = None):
     s = load_settings(_load_config_path())
-    kws = [kw] if kw else generate_trending_keywords(s, count=5)
-    # Use OpenAI to recommend concrete product names from keywords
-    recs = recommend_products_from_keywords(s.providers.openai_model, kws, count=limit)
+    if kw:
+        seeds = [kw]
+    else:
+        # Use DataLab to pick trending seeds from configured seed categories
+        seeds = trending_seeds_from_datalab(s.keywords.seed_categories or ["가전","주방","리빙","디지털"], topk=5)
+    trend_ctx = datalab_trend_context(seeds, days=30)
+    recs = recommend_products_from_keywords(s.providers.openai_model, seeds, count=limit, trend_context=trend_ctx)
     seen = set()
     posted = posted_set()
     items = []
@@ -341,7 +346,8 @@ def api_products_discover(limit: int = 10, kw: Optional[str] = None):
         name = r.get("name")
         if not name:
             continue
-        url = f"https://www.coupang.com/np/search?q={_uq.quote(name)}"
+        sq = r.get("search_query") or name
+        url = f"https://www.coupang.com/np/search?q={_uq.quote(sq)}"
         if url in seen or url in posted:
             continue
         seen.add(url)
@@ -352,11 +358,11 @@ def api_products_discover(limit: int = 10, kw: Optional[str] = None):
             "rating": None,
             "url": url,
             "affiliate_url": get_affiliate(url) or None,
-            "keyword": r.get("reason") or ", ".join(kws),
+            "keyword": r.get("reason") or ", ".join(seeds),
         })
         if len(items) >= limit:
             break
-    return JSONResponse({"items": items, "keywords": kws, "source": "naver+datalab+openai"})
+    return JSONResponse({"items": items, "keywords": seeds, "source": "naver_datalab+openai"})
 
 
 @app.post("/api/generate")
