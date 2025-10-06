@@ -9,6 +9,7 @@ from .miner import select_coupang_miner
 from .models import Product
 from .writer import build_rag, write_post, refine_post, seo_optimize, inject_disclosure, ensure_cta, render_minimal_html
 from .links import generate_affiliate_link
+from .aff_store import get_affiliate
 from .publisher.naver import NaverPublisher
 
 
@@ -36,7 +37,13 @@ def run_once(config_path: str | None = None, count: int | None = None, mode: str
         product = items[0]
         product = miner.enrich_product(product)
         # Try to ensure affiliate deeplink according to config
-        aff = generate_affiliate_link(product.url or "", method=settings.affiliate.generation)
+        aff = None
+        # 0) Check manual portal mapping first (if any)
+        if product.url:
+            aff = get_affiliate(product.url)
+        # 1) If API mode requested, try official deeplink API
+        if not aff:
+            aff = generate_affiliate_link(product.url or "", method=settings.affiliate.generation)
         if aff:
             product.deeplink = aff
 

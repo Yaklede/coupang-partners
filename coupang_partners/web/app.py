@@ -19,6 +19,7 @@ from ..publisher.token_store import (
     get_naver_tokens,
     save_naver_tokens,
 )
+from ..aff_store import put_affiliate, all_affiliates
 from ..orchestrator import run_once
 
 
@@ -140,6 +141,27 @@ def index():
         <pre id='out'>아직 실행하지 않았습니다.</pre>
       </div>
 
+      <div class='card'>
+        <h3>제휴 링크(포털) 수동 등록</h3>
+        <p>API를 아직 사용할 수 없는 경우, 쿠팡 파트너스 포털에서 생성한 제휴 링크를 여기 등록하세요. 수집된 원본 상품 URL과 매핑되어 자동으로 사용됩니다.</p>
+        <p>
+          파트너스 포털: <a href='https://partners.coupang.com/#affiliate/ws' target='_blank'>https://partners.coupang.com/#affiliate/ws</a>
+        </p>
+        <form onsubmit="saveAffiliate(event)">
+          <label>원본 상품 URL</label>
+          <input name='raw_url' placeholder='https://www.coupang.com/...'/>
+          <label>제휴 링크 URL</label>
+          <input name='affiliate_url' placeholder='https://link.coupang.com/...'/>
+          <div style='margin-top:1rem'>
+            <button type='submit'>매핑 저장</button>
+          </div>
+        </form>
+        <details style='margin-top:1rem'>
+          <summary>등록된 매핑 보기</summary>
+          <pre id='aff_map'>로딩 중…</pre>
+        </details>
+      </div>
+
       <script>
         async function runPipeline(e) {{
           e.preventDefault();
@@ -159,6 +181,24 @@ def index():
           const data = await res.json();
           alert(data.message || '저장됨');
         }}
+
+        async function saveAffiliate(e) {{
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const body = Object.fromEntries(fd.entries());
+          const res = await fetch('/api/affiliate', {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(body) }});
+          const data = await res.json();
+          alert(data.message || '저장됨');
+          await refreshAffiliates();
+        }}
+
+        async function refreshAffiliates() {{
+          const res = await fetch('/api/affiliate');
+          const data = await res.json();
+          document.getElementById('aff_map').textContent = JSON.stringify(data, null, 2);
+        }}
+
+        refreshAffiliates();
 
         async function saveNaverApp(e) {{
           e.preventDefault();
@@ -309,3 +349,18 @@ def api_set_config(payload: Dict[str, Any]):
 
     write_config(cfg, "config.yaml")
     return JSONResponse({"message": "저장되었습니다", "config": cfg})
+
+
+@app.get("/api/affiliate")
+def api_get_affiliates():
+    return JSONResponse(all_affiliates())
+
+
+@app.post("/api/affiliate")
+def api_put_affiliate(payload: Dict[str, Any]):
+    raw = payload.get("raw_url")
+    aff = payload.get("affiliate_url")
+    if not raw or not aff:
+        return JSONResponse({"message": "raw_url/affiliate_url 필요"}, status_code=400)
+    put_affiliate(raw, aff)
+    return JSONResponse({"message": "저장되었습니다"})
