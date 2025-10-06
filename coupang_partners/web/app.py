@@ -66,7 +66,11 @@ def index():
       <div class='card'>
         <h3>상품 찾기</h3>
         <p>트렌드(네이버 DataLab + OpenAI) 기반으로 아직 게시하지 않은 상품 10개를 자동으로 찾습니다.</p>
-        <button onclick="discoverProducts()">상품 10개 찾기</button>
+        <div style='display:flex; gap:.5rem; align-items:center;'>
+          <button onclick="discoverProducts()">상품 10개 찾기</button>
+          <input id='kw' placeholder='키워드 직접 입력 (예: 가습기)' style='flex:1;'/>
+          <button onclick="discoverByKeyword()">이 키워드로 찾기</button>
+        </div>
         <div id='discover_list' style='margin-top:1rem'></div>
         <div style='margin-top:1rem'>
           <button onclick='generateSelected()'>선택한 상품으로 글 생성</button>
@@ -225,6 +229,15 @@ def index():
           document.getElementById('discover_list').innerHTML = html || '결과 없음';
         }}
 
+        async function discoverByKeyword() {{
+          const kw = document.getElementById('kw').value.trim();
+          if (!kw) {{ alert('키워드를 입력하세요'); return; }}
+          const res = await fetch(`/api/products/discover?limit=10&kw=${{encodeURIComponent(kw)}}`);
+          const data = await res.json();
+          const html = data.items.map(productRow).join('');
+          document.getElementById('discover_list').innerHTML = html || '결과 없음';
+        }}
+
         async function saveAff(rawEnc) {{
           const raw = decodeURIComponent(rawEnc);
           const input = document.querySelector(`input.aff[data-raw="${{rawEnc}}"]`);
@@ -314,9 +327,9 @@ def api_run(payload: Dict[str, Any]):
 
 
 @app.get("/api/products/discover")
-def api_products_discover(limit: int = 10):
+def api_products_discover(limit: int = 10, kw: Optional[str] = None):
     s = load_settings(_load_config_path())
-    kws = generate_trending_keywords(s, count=limit)
+    kws = [kw] if kw else generate_trending_keywords(s, count=limit)
     miner = select_coupang_miner(s.coupang_source.mode)
     seen = set()
     posted = posted_set()
@@ -343,6 +356,20 @@ def api_products_discover(limit: int = 10):
                 break
         if len(items) >= limit:
             break
+    # Fallback: if no items found, return search links so 사용자가 바로 접근 가능
+    if not items:
+        import urllib.parse as _uq
+        for w in kws[:limit]:
+            search_link = f"https://www.coupang.com/np/search?q={_uq.quote(w)}"
+            items.append({
+                "id": w,
+                "title": f"[검색] {w}",
+                "price": None,
+                "rating": None,
+                "url": search_link,
+                "affiliate_url": None,
+                "keyword": w,
+            })
     return JSONResponse({"items": items, "keywords": kws})
 
 
