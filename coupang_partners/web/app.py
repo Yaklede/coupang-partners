@@ -204,16 +204,16 @@ def index():
           const aff = item.affiliate_url || '';
           return `
             <div style='border:1px solid #eee;padding:.5rem;border-radius:6px;margin:.5rem 0;'>
-              <label><input type='checkbox' class='sel' value='${encodeURIComponent(item.url||'')}'/></label>
-              <strong>${item.title||''}</strong>
+              <label><input type='checkbox' class='sel' value='${{encodeURIComponent(item.url||'')}}'/></label>
+              <strong>${{item.title||''}}</strong>
               <div>
-                <a href='${item.url||'#'}' target='_blank'>원본보기</a>
-                ${item.price?` · 가격: ${item.price}`:''}
-                ${item.rating?` · 평점: ${item.rating}`:''}
+                <a href='${{item.url||'#'}}' target='_blank'>원본보기</a>
+                ${{item.price?(' · 가격: '+item.price):''}}
+                ${{item.rating?(' · 평점: '+item.rating):''}}
               </div>
               <div>
-                제휴링크: <input class='aff' data-raw='${encodeURIComponent(item.url||'')}' value='${aff}' placeholder='https://link.coupang.com/...'/>
-                <button onclick='saveAff("${encodeURIComponent(item.url||'')}")'>저장</button>
+                제휴링크: <input class='aff' data-raw='${{encodeURIComponent(item.url||'')}}' value='${{aff}}' placeholder='https://link.coupang.com/...'/>
+                <button onclick='saveAff("${{encodeURIComponent(item.url||'')}}")'>저장</button>
               </div>
             </div>`;
         }}
@@ -227,7 +227,7 @@ def index():
 
         async function saveAff(rawEnc) {{
           const raw = decodeURIComponent(rawEnc);
-          const input = document.querySelector(`input.aff[data-raw="${rawEnc}"]`);
+          const input = document.querySelector(`input.aff[data-raw="${{rawEnc}}"]`);
           const aff = input.value.trim();
           const res = await fetch('/api/affiliate', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{raw_url:raw, affiliate_url:aff}})}});
           const data = await res.json();
