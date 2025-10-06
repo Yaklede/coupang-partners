@@ -322,7 +322,10 @@ def api_products_discover(limit: int = 10):
     posted = posted_set()
     items = []
     for kw in kws:
-        ps = miner.search_products(kw, limit=10)
+        try:
+            ps = miner.search_products(kw, limit=8)
+        except Exception:
+            ps = []
         for p in ps:
             if not p.url or p.url in seen or p.url in posted:
                 continue
