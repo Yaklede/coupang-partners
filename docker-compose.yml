@@ -21,6 +21,7 @@ services:
       - ./:/app
     env_file:
       - .env
+    # Use module runner; requires coupang_partners/web/__main__.py
     entrypoint: ["python", "-m", "coupang_partners.web"]
     ports:
       - "8000:8000"
