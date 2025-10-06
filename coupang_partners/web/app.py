@@ -213,10 +213,10 @@ def index():
               <label><input type='checkbox' class='sel' value='${{encodeURIComponent(item.url||'')}}'/></label>
               <strong>${{item.title||''}}</strong>
               <div>
-                <a href='${{item.url||'#'}}' target='_blank'>원본보기</a>
-                ${{item.price?(' · 가격: '+item.price):''}}
-                ${{item.rating?(' · 평점: '+item.rating):''}}
+                <a href='${{item.url||'#'}}' target='_blank'>쿠팡 검색</a>
+                ${{item.query?(' · 검색어: '+item.query):''}}
               </div>
+              ${{item.reason?`<div style='color:#666'>추천 사유: ${item.reason}</div>`:''}}
               <div>
                 제휴링크: <input class='aff' data-raw='${{encodeURIComponent(item.url||'')}}' value='${{aff}}' placeholder='https://link.coupang.com/...'/>
                 <button onclick='saveAff("${{encodeURIComponent(item.url||'')}}")'>저장</button>
@@ -337,7 +337,14 @@ def api_products_discover(limit: int = 10, kw: Optional[str] = None):
         # Use DataLab to pick trending seeds from configured seed categories
         seeds = trending_seeds_from_datalab(s.keywords.seed_categories or ["가전","주방","리빙","디지털"], topk=5)
     trend_ctx = datalab_trend_context(seeds, days=30)
-    recs = recommend_products_from_keywords(s.providers.openai_model, seeds, count=limit, trend_context=trend_ctx)
+    llm_status = "ok"
+    llm_error = None
+    try:
+        recs = recommend_products_from_keywords(s.providers.openai_model, seeds, count=limit, trend_context=trend_ctx)
+    except Exception as e:
+        llm_status = "error"
+        llm_error = str(e)
+        recs = []
     seen = set()
     posted = posted_set()
     items = []
@@ -358,11 +365,17 @@ def api_products_discover(limit: int = 10, kw: Optional[str] = None):
             "rating": None,
             "url": url,
             "affiliate_url": get_affiliate(url) or None,
-            "keyword": r.get("reason") or ", ".join(seeds),
+            "reason": r.get("reason") or "trend-based",
+            "query": sq,
         })
         if len(items) >= limit:
             break
-    return JSONResponse({"items": items, "keywords": seeds, "source": "naver_datalab+openai"})
+    return JSONResponse({
+        "items": items,
+        "keywords": seeds,
+        "source": "naver_datalab+openai",
+        "meta": {"llm_status": llm_status, "llm_error": llm_error, "trend": trend_ctx},
+    })
 
 
 @app.post("/api/generate")
