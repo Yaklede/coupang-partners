@@ -1,0 +1,32 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - backend/.env
+    environment:
+      # Persist DB to a volume at /data
+      - DATABASE_URL=sqlite+aiosqlite:////data/app.db
+    volumes:
+      - api-data:/data
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"  # optional direct access
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  api-data:
+    driver: local
+
